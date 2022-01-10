@@ -21,10 +21,10 @@ args = vars(parser.parse_args())
 
 exp_name=args['exp_name']
 eof_analysis_wanted=args['eofs']
-#inpath=f'/work/bd1022/b381739/{exp_name}'
-#outpath=f'/work/bd1022/b381739/{exp_name}/postprocessed'
-inpath=f'/mnt/c/Users/pablo/Nextcloud/3_Mastersemester/Masterarbeit/test_files'
-outpath=f'/mnt/c/Users/pablo/Nextcloud/3_Mastersemester/Masterarbeit/test_files/postprocessed'
+inpath=f'/work/bd1022/b381739/{exp_name}'
+outpath=f'/work/bd1022/b381739/{exp_name}/postprocessed'
+#inpath=f'/mnt/c/Users/pablo/Nextcloud/3_Mastersemester/Masterarbeit/test_files'
+#outpath=f'/mnt/c/Users/pablo/Nextcloud/3_Mastersemester/Masterarbeit/test_files/postprocessed'
 
 try: 
     os.makedirs(outpath)
