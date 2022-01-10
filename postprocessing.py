@@ -47,7 +47,7 @@ print('model data read in')
 
 if eof_analysis_wanted:
     # deseasonalize, detrend, crop, area-weight
-    x = md.sel(lon=slice(90,20)).aps.groupby("time.month") - md.sel(lon=slice(90,20)).aps.groupby("time.month").mean()
+    x = md.sel(lat=slice(90,20)).aps.groupby("time.month") - md.sel(lat=slice(90,20)).aps.groupby("time.month").mean()
     x = x - x.mean('time')
     x = x * np.sqrt(np.cos(np.deg2rad(x.lat)))
 
