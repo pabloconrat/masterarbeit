@@ -34,10 +34,18 @@ except FileExistsError:
 os.chdir(inpath)
 model_files = [fi for fi in os.listdir(inpath) if fi.endswith('vaxtra.nc')]
 
+var_list = ['um1', 'vm1', 'vervel', 'tm1', 'aps', 'geopot_p']
+
 def read_model_output(infiles):
     ds_list = []
+    var_list_sel = []
+    test_file = xr.open_dataset(infiles[0], engine='netcdf4')
+    for var in var_list:
+        if var in test_file:
+            var_list_sel.append(var)
+
     for file in infiles:
-        ds_list.append(xr.open_dataset(file, engine='netcdf4')[['um1', 'vm1', 'vervel', 'tm1', 'aps']])
+        ds_list.append(xr.open_dataset(file, engine='netcdf4')[var_list_sel])
     ds = xr.concat(ds_list, dim='time')
     return ds
 
@@ -55,7 +63,9 @@ if eof_analysis_wanted:
     solver = Eof(x)
     eofs = solver.eofs()
     pcs = solver.pcs(pcscaling=1)
+    var_explained = solver.varianceFraction()
 
+    eofs['var_exp'] = var_explained
     eofs.to_netcdf(f'{outpath}/{exp_name}_eofs.nc')
     pcs.to_netcdf(f'{outpath}/{exp_name}_pcs.nc')
 
