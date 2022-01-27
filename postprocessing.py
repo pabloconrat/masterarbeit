@@ -51,6 +51,9 @@ def read_model_output(infiles):
 
 # model data
 md = read_model_output(model_files).sortby('time').sel(time=slice('2000', '2003'))
+# set NaN in the wind fields to zero to reduce spurius averages of only a few points
+fillna_values = {"um1": 0, "vm1": 0, 'vervel': 0}
+md.fillna(value=fillna_values)
 print('model data read in')
 
 if eof_analysis_wanted:
