@@ -96,7 +96,7 @@ md_zm['eke'] = eke
 vu = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et})
 vT = xr.Dataset({'vT_mt': vT_mt, 'vT_et': vT_et})
 
-md.sel(lat=slice(90,0)).sel(plev=[200,500,800,1000], method='nearest').to_netcdf(f'{outpath}/{exp_name}_pl_sel.nc')
+md.sel(lat=slice(90,0)).resample(time='3D').mean('time').sel(plev=[100,200,500,800,900], method='nearest').to_netcdf(f'{outpath}/{exp_name}_pl_sel.nc')
 md_zm.to_netcdf(f'{outpath}/{exp_name}_zm_pp.nc')
 vu.to_netcdf(f'{outpath}/{exp_name}_vu_pp.nc')
 vT.to_netcdf(f'{outpath}/{exp_name}_vT_pp.nc')
