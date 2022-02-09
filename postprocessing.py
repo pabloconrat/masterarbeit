@@ -33,6 +33,7 @@ def postprocessing(model_files, year):
     # model data
     md = read_model_output(files_in_year).sortby('time')
     print(f'{year}: model data read in')
+    cos_lat = np.cos(np.radians(md_zm.lat))
 
     if eof_analysis_wanted:
         from eofs.xarray import Eof
@@ -57,14 +58,18 @@ def postprocessing(model_files, year):
     print(f'{year}: zonal averages and anomalies computed')
 
     # momentum transport
-    vu_mt = md_zm.vm1 * md_zm.um1 * np.cos(np.radians(md_zm.lat))
-    vu_et = (md_anom.vm1 * md_anom.um1 ).mean('lon') * np.cos(np.radians(md_zm.lat))
+    vu_mt = md_zm.vm1 * md_zm.um1 * cos_lat
+    vu_et = (md_anom.vm1 * md_anom.um1 ).mean('lon') * cos_lat
     print(f'{year}: momentum transport calculated')
 
     # heat transport
-    vT_mt = md_zm.vm1 * md_zm.tm1 * np.cos(np.radians(md_zm.lat))
-    vT_et = (md_anom.vm1 * md_anom.tm1).mean('lon') * np.cos(np.radians(md_zm.lat))
+    vT_mt = md_zm.vm1 * md_zm.tm1 * cos_lat
+    vT_et = (md_anom.vm1 * md_anom.tm1).mean('lon') * cos_lat
     print(f'{year}: heat transport calculated')
+
+    wu_mt = md_zm.vervel * md_zm.um1 * cos_lat
+    wu_et = (md_anom.vervel * md_anom.um1).mean('lon') * cos_lat
+    print(f'{year}: vertical transport of zonal momentum calculated')
 
     # dry static energy transport
     cp = 1004
@@ -72,8 +77,8 @@ def postprocessing(model_files, year):
     if 'geopot_p' in md:
         dse = cp * md.tm1 + g * md.geopot_p
         dse_anom = dse - dse.mean('lon')
-        vdse_mt = md_zm.vm1 * dse.mean('lon') * np.cos(np.radians(md_zm.lat))
-        vdse_et = (md_anom.vm1 * dse_anom).mean('lon') * np.cos(np.radians(md_zm.lat))
+        vdse_mt = md_zm.vm1 * dse.mean('lon') * cos_lat
+        vdse_et = (md_anom.vm1 * dse_anom).mean('lon') * cos_lat
         vdse = xr.Dataset({'vdse_mt': vdse_mt, 'vdse_et': vdse_et})
         vdse.to_netcdf(f'{outpath}/{exp_name}_{year}_vdse_pp.nc')
 
@@ -84,16 +89,14 @@ def postprocessing(model_files, year):
     md_zm['eke'] = eke
     eke.close()
 
-    vu = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et})
-    vT = xr.Dataset({'vT_mt': vT_mt, 'vT_et': vT_et})
+    transports = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'vT_mt': vT_mt, 'vT_et': vT_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
 
     if ml is False:
         md.sel(lat=slice(90,0)).sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     else:
         md.sel(lat=slice(90,0)).sel(lev=[70,74,80,83,85]).to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
-    vu.to_netcdf(f'{outpath}/{exp_name}_{year}_vu_pp.nc')
-    vT.to_netcdf(f'{outpath}/{exp_name}_{year}_vT_pp.nc')
+    transports.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
     
 
     print(f'{year}: \t done')
