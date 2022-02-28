@@ -33,7 +33,6 @@ def postprocessing(model_files, year):
     # model data
     md = read_model_output(files_in_year).sortby('time')
     print(f'{year}: model data read in')
-    cos_lat = np.cos(np.radians(md_zm.lat))
 
     if eof_analysis_wanted:
         from eofs.xarray import Eof
@@ -56,6 +55,7 @@ def postprocessing(model_files, year):
     md_zm = md.mean('lon')
     md_anom = md - md_zm
     print(f'{year}: zonal averages and anomalies computed')
+    cos_lat = np.cos(np.radians(md_zm.lat))
 
     # momentum transport
     vu_mt = md_zm.vm1 * md_zm.um1 * cos_lat
@@ -71,30 +71,33 @@ def postprocessing(model_files, year):
     wu_et = (md_anom.vervel * md_anom.um1).mean('lon') * cos_lat
     print(f'{year}: vertical transport of zonal momentum calculated')
 
+    transports = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'vT_mt': vT_mt, 'vT_et': vT_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
+
     # dry static energy transport
     cp = 1004
     g = 9.81
     if 'geopot_p' in md:
-        dse = cp * md.tm1 + g * md.geopot_p
+        dse = cp * md.tm1 + md.geopot_p
         dse_anom = dse - dse.mean('lon')
         vdse_mt = md_zm.vm1 * dse.mean('lon') * cos_lat
         vdse_et = (md_anom.vm1 * dse_anom).mean('lon') * cos_lat
-        vdse = xr.Dataset({'vdse_mt': vdse_mt, 'vdse_et': vdse_et})
-        vdse.to_netcdf(f'{outpath}/{exp_name}_{year}_vdse_pp.nc')
+        transports['vdse_mt'] = vdse_mt
+        transports['vdse_et'] = vdse_et
 
 
     # eddy kinetic energy
-    eke = ((md_anom.vm1**2).mean('lon')
-        + (md_anom.um1**2).mean('lon')) * 0.5
-    md_zm['eke'] = eke
-    eke.close()
+    lat_bins = [-90,0,90]
+    lat_labels = [-45,45]
+    eke_zm = ((md_anom.vm1**2) + (md_anom.um1**2)).mean('lat') * 0.5
+    eke_hemisphere = (((md_anom.vm1**2) + (md_anom.um1**2)) * cos_lat).groupby_bins('lat', lat_bins, labels=lat_labels).mean() * 0.5
+    eke_hemisphere.to_netcdf(f'{outpath}/{exp_name}_{year}_eke_pp.nc')
+    md_zm['eke'] = eke_zm
 
-    transports = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'vT_mt': vT_mt, 'vT_et': vT_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
 
     if ml is False:
         md.sel(lat=slice(90,0)).sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     else:
-        md.sel(lat=slice(90,0)).sel(lev=[70,74,80,83,85]).to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
+        md.sel(lat=slice(90,0)).sel(lev=[70,74,80,83,85]).to_netcdf(f'{outpath}/{exp_name}_{year}_ml_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
     transports.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
     
@@ -130,13 +133,12 @@ except FileExistsError:
 
 os.chdir(inpath)
 model_files = [fi for fi in os.listdir(inpath) if fi.endswith(output_ending) and fi.startswith(f'{exp_name}_2')]
-print(model_files)
 years = [model_file[15:19] for model_file in model_files]
 years = list(set(years))
 years.sort()
 print(years)
 
-var_list = ['um1', 'vm1', 'vervel', 'tm1', 'aps', 'geopot_p']
+var_list = ['um1', 'vm1', 'vervel', 'tm1', 'aps', 'geopot_p', 'hyam', 'hybm']
 
 var_list_sel = []
 ds_file = xr.open_dataset(model_files[0], engine='netcdf4')
