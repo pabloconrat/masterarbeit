@@ -106,7 +106,7 @@ def postprocessing(model_files, year):
     eke_zm = eke.mean('lon')
     md_zm['eke'] = eke_zm
 
-    eke_fft.to_netcdf(f'{outpath}/{exp_name}_{year}_eke_fft.nc)
+    eke_fft.to_netcdf(f'{outpath}/{exp_name}_{year}_eke_fft.nc')
 
 
     if ml is False:
