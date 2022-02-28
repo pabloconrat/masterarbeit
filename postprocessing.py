@@ -13,7 +13,17 @@ import numpy as np
 import xarray as xr 
 import argparse
 
-
+def xr_spatial_fft_analysis(data):
+    
+    dx = data.lon.values[1] - data.lon.values[0]
+    dim='k'
+    result =  xr.apply_ufunc(
+        np.fft.fft, data, input_core_dims=[['lon']], output_core_dims=[[dim]],
+        kwargs={'norm':'ortho'}
+    )
+    k = np.fft.fftfreq(result.k.shape[0], d=dx/(360))
+    result[dim] = k
+    return result
 
 def read_model_output(infiles):
     ds_list = []
@@ -86,12 +96,17 @@ def postprocessing(model_files, year):
 
 
     # eddy kinetic energy
-    lat_bins = [-90,0,90]
-    lat_labels = [-45,45]
-    eke_zm = ((md_anom.vm1**2) + (md_anom.um1**2)).mean('lat') * 0.5
-    eke_hemisphere = (((md_anom.vm1**2) + (md_anom.um1**2)) * cos_lat).groupby_bins('lat', lat_bins, labels=lat_labels).mean() * 0.5
-    eke_hemisphere.to_netcdf(f'{outpath}/{exp_name}_{year}_eke_pp.nc')
+
+    eke = ((md.vm1**2) + (md.um1**2)) * 0.5
+    eke_fft = xr_spatial_fft_analysis(eke)
+    if ml is True:
+        eke_fft.sel(k=slice(0,18), ml=(60,90))
+    else:
+        eke_fft.sel(k=slice(0,18), pl=(100,1000))
+    eke_zm = eke.mean('lon')
     md_zm['eke'] = eke_zm
+
+    eke_fft.to_netcdf(f'{outpath}/{exp_name}_{year}_eke_fft.nc)
 
 
     if ml is False:
