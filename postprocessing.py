@@ -102,7 +102,7 @@ def postprocessing(model_files, year):
     if ml is True:
         eke_fft.sel(k=slice(0,18), ml=(60,90))
     else:
-        eke_fft.sel(k=slice(0,18), pl=(100,1000))
+        eke_fft.sel(k=slice(0,18), plev=(100,1000))
     eke_zm = eke.mean('lon')
     md_zm['eke'] = eke_zm
 
