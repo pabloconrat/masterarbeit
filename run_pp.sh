@@ -9,5 +9,5 @@
 #SBATCH -o EMIL_pp_%j.out          # File name for standard and error output
 module load python3
 
-python3 /home/b/b381739/masterarbeit/postprocessing.py EMIL_SW06_tst2
+python3 /home/b/b381739/masterarbeit/postprocessing.py EMIL_SW06_tst4
 

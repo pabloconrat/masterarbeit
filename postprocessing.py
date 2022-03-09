@@ -25,6 +25,10 @@ def xr_spatial_fft_analysis(data):
     result[dim] = k
     return result
 
+def save_complex(data_array, *args, **kwargs):
+    ds = xr.Dataset({'real': data_array.real, 'imag': data_array.imag})
+    return ds.to_netcdf(*args, **kwargs)
+
 def read_model_output(infiles):
     ds_list = []
     for file in infiles:
@@ -99,14 +103,13 @@ def postprocessing(model_files, year):
 
     eke = ((md.vm1**2) + (md.um1**2)) * 0.5
     eke_fft = xr_spatial_fft_analysis(eke)
+    eke_fft
     if ml is True:
-        eke_fft.sel(k=slice(0,18), ml=(60,90))
+        save_complex(eke_fft.sel(k=slice(0,18), ml=slice(60,90)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
     else:
-        eke_fft.sel(k=slice(0,18), plev=(100,1000))
+        save_complex(eke_fft.sel(k=slice(0,18), plev=slice(100,1000)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
     eke_zm = eke.mean('lon')
     md_zm['eke'] = eke_zm
-
-    eke_fft.to_netcdf(f'{outpath}/{exp_name}_{year}_eke_fft.nc')
 
 
     if ml is False:
