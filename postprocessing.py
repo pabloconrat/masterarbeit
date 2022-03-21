@@ -1,12 +1,10 @@
 #!bin/python3
-#SBATCH -J EMIL_pp              # Specify job name
-#SBATCH -p prepost             # Use partition prepost
-#SBATCH -N 1                   # Specify number of nodes
-#SBATCH -n 1                   # Specify max. number of tasks to be invoked
-#SBATCH --mem-per-cpu=5300     # Set memory required per allocated CPU
+#SBATCH -J EMIL_pp             # Specify job name
+#SBATCH -p shared         # Use partition prepost
+#SBATCH --mem=20000
 #SBATCH -t 01:00:00            # Set a limit on the total run time
 #SBATCH -A bd1022              # Charge resources on this project account
-#SBATCH -o EMIL_pp_%j.out          # File name for standard and error output
+#SBATCH -o EMIL_pp_%j.out      # File name for standard and error output
 
 import os
 import numpy as np
@@ -35,7 +33,7 @@ def read_model_output(infiles):
         ds_file = xr.open_dataset(file, engine='netcdf4')[var_list_sel]
         ds_file.fillna(value=fillna_values)
         ds_list.append(ds_file)
-    ds = xr.concat(ds_list, dim='time')
+    ds = xr.combine_by_coords(ds_list, combine_attrs='drop_conflicts', data_vars='minimal')
     for ds_f in ds_list:
         ds_f.close()
     return ds
@@ -105,7 +103,7 @@ def postprocessing(model_files, year):
     eke_fft = xr_spatial_fft_analysis(eke)
     eke_fft
     if ml is True:
-        save_complex(eke_fft.sel(k=slice(0,18), ml=slice(60,90)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
+        save_complex(eke_fft.sel(k=slice(0,18), lev=slice(60,90)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
     else:
         save_complex(eke_fft.sel(k=slice(0,18), plev=slice(100,1000)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
     eke_zm = eke.mean('lon')
@@ -118,7 +116,6 @@ def postprocessing(model_files, year):
         md.sel(lat=slice(90,0)).sel(lev=[70,74,80,83,85]).to_netcdf(f'{outpath}/{exp_name}_{year}_ml_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
     transports.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
-    
 
     print(f'{year}: \t done')
     return
@@ -154,6 +151,7 @@ model_files = [fi for fi in os.listdir(inpath) if fi.endswith(output_ending) and
 years = [model_file[15:19] for model_file in model_files]
 years = list(set(years))
 years.sort()
+print(exp_name)
 print(years)
 
 var_list = ['um1', 'vm1', 'vervel', 'tm1', 'aps', 'geopot_p', 'hyam', 'hybm']
@@ -165,6 +163,7 @@ for var in var_list:
         var_list_sel.append(var)
 
 ds_file.close()
+print(var_list_sel)
 
 # set NaN in the wind fields to zero to reduce spurius averages of only a few points
 fillna_values = {"um1": 0, "vm1": 0, 'vervel': 0}
