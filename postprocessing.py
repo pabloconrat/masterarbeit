@@ -245,5 +245,5 @@ print(f'model level variables: {ml_var_list_sel}')
 fillna_values = {"um1": 0, "vm1": 0, 'vervel': 0}
 
 for year in years:
-    #postprocessing_pl(pl_files, year, pl_var_list_sel)
+    postprocessing_pl(pl_files, year, pl_var_list_sel)
     postprocessing_ml(ml_files, year, ml_var_list_sel)
