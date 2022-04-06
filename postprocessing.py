@@ -31,23 +31,36 @@ def save_complex(data_array, *args, **kwargs):
     ds = xr.Dataset({'real': data_array.real, 'imag': data_array.imag})
     return ds.to_netcdf(*args, **kwargs)
 
-def read_model_output(infiles, var_list_sel):
+def read_model_output(infiles, var_list_sel=None, fillna=False):
     ds_list = []
     for file in infiles:
-        ds_file = xr.open_dataset(file, engine='netcdf4')[var_list_sel]
-        ds_file.fillna(value=fillna_values)
+        if var_list_sel is None:
+            ds_file = xr.open_dataset(file, engine='netcdf4')
+        else:
+            ds_file = xr.open_dataset(file, engine='netcdf4')[var_list_sel]
+
+        if fillna:
+            ds_file.fillna(value=fillna_values)
         ds_list.append(ds_file)
     ds = xr.combine_by_coords(ds_list, combine_attrs='drop_conflicts', data_vars='minimal')
     for ds_f in ds_list:
         ds_f.close()
     return ds
 
+def merge_pp_files(path, types):
+    for tp in types:
+        files = [fi for fi in os.listdir(path) if fi.endswith(f'_{tp}.nc')]
+        ds = read_model_output(files)
+        ds.to_netcdf(f'{exp_name}_{tp}.nc')
+        [os.remove(file) for file in files]
+    return
+
 def postprocessing_pl(model_files, year, pl_var_list_sel):
 
     files_in_year = [mf for mf in model_files if year in mf ]
     files_in_year.sort()
     # model data
-    md = read_model_output(files_in_year, var_list_sel=pl_var_list_sel).sortby('time')
+    md = read_model_output(files_in_year, var_list_sel=pl_var_list_sel, fillna=True).sortby('time')
     print(f'{year}: model data read in')
 
     if eof_analysis_wanted:
@@ -78,16 +91,21 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     vu_et = (md_anom.vm1 * md_anom.um1 ).mean('lon') * cos_lat
     print(f'{year}: momentum transport calculated')
 
+    wu_mt = md_zm.vervel * md_zm.um1 * cos_lat
+    wu_et = (md_anom.vervel * md_anom.um1).mean('lon') * cos_lat
+    print(f'{year}: vertical transport of zonal momentum calculated')
+
     # heat transport
     vT_mt = md_zm.vm1 * md_zm.tm1 * cos_lat
     vT_et = (md_anom.vm1 * md_anom.tm1).mean('lon') * cos_lat
     print(f'{year}: heat transport calculated')
 
-    wu_mt = md_zm.vervel * md_zm.um1 * cos_lat
-    wu_et = (md_anom.vervel * md_anom.um1).mean('lon') * cos_lat
-    print(f'{year}: vertical transport of zonal momentum calculated')
-
+    # Interpolate heat transport to 700 hPa 
+    vT_mt_700 = vT_mt.interp(plev=700)
+    vT_et_700 = vT_et.interp(plev=700)
+ 
     tps = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'vT_mt': vT_mt, 'vT_et': vT_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
+    tps_ml = xr.Dataset({'vT_mt': vT_mt_700, 'vT_et': vT_et_700})
 
     # dry static energy transport
 
@@ -112,6 +130,7 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     md.sel(lat=slice(90,0)).sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
     tps.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
+    tps_ml.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_int_pp.nc')
 
     print(f'{year}: \t done')
     md.close()
@@ -123,7 +142,7 @@ def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g):
     files_in_year = [mf for mf in model_files if year in mf ]
     files_in_year.sort()
     # model data
-    md = read_model_output(files_in_year, var_list_sel=ml_var_list_sel).sortby('time')
+    md = read_model_output(files_in_year, var_list_sel=ml_var_list_sel, fillna=True).sortby('time')
     print(f'ml - {year}: model data read in')
 
     md['p'] = md.hyam + md.hybm * md.aps
@@ -145,21 +164,17 @@ def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g):
     cos_lat = np.cos(np.radians(md_zm.lat))
 
     # momentum transport
-    vu_mt = (md_zm.vm1 * md_zm.um1 * md_zm.dp).sum('lev') * cos_lat * 2 * np.pi * r_e / g
-    vu_et = (md_anom.vm1 * md_anom.um1 * dp).sum('lev').mean('lon') * cos_lat * 2 * np.pi * r_e / g
+    vu_mt = (md_zm.vm1 * md_zm.um1 * md_zm.dp).mean('lev') * cos_lat
+    vu_et = (md_anom.vm1 * md_anom.um1 * dp).mean(['lon', 'lev']) * cos_lat 
     print(f'ml - {year}: momentum transport calculated')
 
-    # heat transport
-    vT_mt = (md_zm.vm1 * md_zm.tm1 * md_zm.dp).sum('lev') * cos_lat * 2 * np.pi * r_e / g
-    vT_et = (md_anom.vm1 * md_anom.tm1 * dp).sum('lev').mean('lon') * cos_lat * 2 * np.pi * r_e / g
-    print(f'ml - {year}: heat transport calculated')
-
-    wu_mt = (md_zm.vervel * md_zm.um1 * md_zm.dp).sum('lev') * cos_lat * 2 * np.pi * r_e / g
-    wu_et = (md_anom.vervel * md_anom.um1 * dp).sum('lev').mean('lon') * cos_lat * 2 * np.pi * r_e / g
+    # vertical momentum transport
+    wu_mt = (md_zm.vervel * md_zm.um1 * md_zm.dp).mean('lev') * cos_lat 
+    wu_et = (md_anom.vervel * md_anom.um1 * dp).mean(['lon', 'lev']) * cos_lat 
     print(f'ml - {year}: vertical transport of zonal momentum calculated')
 
     # join all transports in one dataset
-    tps = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'vT_mt': vT_mt, 'vT_et': vT_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
+    tps = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
 
     # dry static energy transport
     cp = 1004
@@ -173,18 +188,16 @@ def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g):
         tps['vdse_et'] = vdse_et
         print(f'ml - {year}: DSE transport calculated')
 
-
     # eddy kinetic energy
-
-    eke = ((md.vm1**2) + (md.um1**2)) * 0.5
-    eke_fft = xr_spatial_fft_analysis(eke)
+    #eke = ((md.vm1**2) + (md.um1**2)) * 0.5
+    #eke_fft = xr_spatial_fft_analysis(eke)
     #save_complex(eke_fft.sel(k=slice(0,18), lev=slice(60,90)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
-    eke_zm = eke.mean('lon')
-    md_zm['eke'] = eke_zm
+    #eke_zm = eke.mean('lon')
+    #md_zm['eke'] = eke_zm
 
     #md.sel(lat=slice(90,0)).sel(lev=[70,74,80,83,85]).to_netcdf(f'{outpath}/{exp_name}_{year}_ml_sel.nc')    
     #md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_ml_pp.nc')
-    tps.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_int_pp.nc')
+    tps.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_int_pp.nc', mode='a')
 
     print(f'ml - {year}: \t done')
     md.close()
@@ -195,11 +208,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('exp_name')
 parser.add_argument('--ml', action='store_true', default=False)
 parser.add_argument('--eofs', action='store_true', default=False)
+parser.add_argument('--years', nargs='*', default=['2000', '2001', '2002'])
 args = vars(parser.parse_args())
 
 exp_name=args['exp_name']
 eof_analysis_wanted=args['eofs']
 ml=args['ml']
+years=args['years']
 output_ending = 'vaxtra.nc'
 ml_output_ending='emil.nc'
 
@@ -215,12 +230,14 @@ try:
 except FileExistsError:
     pass
 
+separator = ( 14  - len(exp_name) + 1) * '_'
+filecheck_list = [exp_name + separator + year for year in years]
+filecheck_tuple = tuple(filecheck_list)
+
 os.chdir(inpath)
-pl_files = [fi for fi in os.listdir(inpath) if fi.endswith(output_ending) and fi.startswith(f'{exp_name}_2')]
-ml_files = [fi for fi in os.listdir(inpath) if fi.endswith(ml_output_ending) and fi.startswith(f'{exp_name}_2')]
-years = [model_file[15:19] for model_file in pl_files]
-years = list(set(years))
-years.sort()
+pl_files = [fi for fi in os.listdir(inpath) if fi.endswith(output_ending) and fi.startswith(filecheck_tuple)]
+ml_files = [fi for fi in os.listdir(inpath) if fi.endswith(ml_output_ending) and fi.startswith(filecheck_tuple)]
+
 print(exp_name)
 print(years)
 
@@ -247,3 +264,7 @@ fillna_values = {"um1": 0, "vm1": 0, 'vervel': 0}
 for year in years:
     postprocessing_pl(pl_files, year, pl_var_list_sel)
     postprocessing_ml(ml_files, year, ml_var_list_sel)
+
+os.chdir(outpath)
+endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp']
+merge_pp_files(outpath, endings)
