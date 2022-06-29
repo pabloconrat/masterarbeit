@@ -10,6 +10,7 @@ import os
 import numpy as np
 import xarray as xr 
 import argparse
+from pathlib import Path
 
 cp = 1004
 g = 9.81
@@ -50,9 +51,10 @@ def read_model_output(infiles, var_list_sel=None, fillna=False):
 def merge_pp_files(path, types):
     for tp in types:
         files = [fi for fi in os.listdir(path) if fi.endswith(f'_{tp}.nc')]
-        ds = read_model_output(files)
-        ds.to_netcdf(f'{exp_name}_{tp}.nc')
-        [os.remove(file) for file in files]
+        if files:
+            ds = read_model_output(files)
+            ds.to_netcdf(f'{exp_name}_{tp}.nc')
+            [os.remove(file) for file in files]
     return
 
 def postprocessing_pl(model_files, year, pl_var_list_sel):
@@ -63,18 +65,27 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     md = read_model_output(files_in_year, var_list_sel=pl_var_list_sel, fillna=True).sortby('time')
     print(f'{year}: model data read in')
 
+    nplevs = md.plev.size
+    dp_top = (md.plev.isel(plev=0) + md.plev.isel(plev=1).values)/2 - md.plev.isel(plev=0).values
+    dp_mid = ((md.plev.isel(plev=slice(1,nplevs-1)) + md.plev.isel(plev=slice(2,nplevs)).values)/2 -
+              (md.plev.isel(plev=slice(0,nplevs-2)).values + md.plev.isel(plev=slice(1,nplevs-1)).values)/2)
+    dp_bottom = md.aps - (md.plev.isel(plev=nplevs-1) + md.plev.isel(plev=nplevs-2).values)/2
+    dp = xr.concat([dp_top, dp_mid, dp_bottom], dim='plev')
+
     if eof_analysis_wanted:
         from eofs.xarray import Eof
         # deseasonalize, detrend, crop, area-weight
-        x = md.sel(lat=slice(90,20)).aps.groupby("time.month") - md.sel(lat=slice(90,20)).aps.groupby("time.month").mean()
+        # Geopotential option
+        #x = md.sel(lat=slice(90,20)).sel(plev=500, method='nearest').geopot_p 
+        # Vertically integrated wind option
+        u_int = (md.um1 * dp).sel(plev=slice(50,850)).mean(['plev','lon'])
+        x = u_int
         x = x - x.mean('time')
         x = x * np.sqrt(np.cos(np.deg2rad(x.lat)))
-
         solver = Eof(x)
-        eofs = solver.eofs()
+        eofs = solver.eofs().to_dataset(name='eofs')
         pcs = solver.pcs(pcscaling=1)
         var_explained = solver.varianceFraction()
-
         eofs['var_exp'] = var_explained
         eofs.to_netcdf(f'{outpath}/{exp_name}_{year}_eofs.nc')
         pcs.to_netcdf(f'{outpath}/{exp_name}_{year}_pcs.nc')
@@ -228,7 +239,7 @@ outpath=f'/work/bd1022/b381739/{exp_name}/postprocessed'
 try: 
     os.makedirs(outpath)
 except FileExistsError:
-    pass
+    [f.unlink() for f in Path(outpath).glob("*") if f.is_file()] 
 
 separator = ( 14  - len(exp_name) + 1) * '_'
 filecheck_list = [exp_name + separator + year for year in years]
@@ -266,5 +277,5 @@ for year in years:
     postprocessing_ml(ml_files, year, ml_var_list_sel)
 
 os.chdir(outpath)
-endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp']
+endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp', 'eofs', 'pcs']
 merge_pp_files(outpath, endings)

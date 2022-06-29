@@ -6,4 +6,5 @@
 #SBATCH -A bd1022              # Charge resources on this project account
 #SBATCH -o EMIL_pp_%j.out      # File name for standard and error output
 
-python3 /home/b/b381739/masterarbeit/postprocessing.py EMIL_SW06_tst9
+python3 /home/b/b381739/masterarbeit/postprocessing.py EMIL_SW120f100 --years 2000 2001 --eofs
+
