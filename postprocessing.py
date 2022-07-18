@@ -7,6 +7,7 @@
 #SBATCH -o EMIL_pp_%j.out      # File name for standard and error output
 
 import os
+from re import L
 import numpy as np
 import xarray as xr 
 import argparse
@@ -73,7 +74,6 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     dp = xr.concat([dp_top, dp_mid, dp_bottom], dim='plev')
 
     if eof_analysis_wanted:
-        from eofs.xarray import Eof
         # deseasonalize, detrend, crop, area-weight
         # Geopotential option
         #x = md.sel(lat=slice(90,20)).sel(plev=500, method='nearest').geopot_p 
@@ -82,13 +82,7 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
         x = u_int
         x = x - x.mean('time')
         x = x * np.sqrt(np.cos(np.deg2rad(x.lat)))
-        solver = Eof(x)
-        eofs = solver.eofs().to_dataset(name='eofs')
-        pcs = solver.pcs(pcscaling=1)
-        var_explained = solver.varianceFraction()
-        eofs['var_exp'] = var_explained
-        eofs.to_netcdf(f'{outpath}/{exp_name}_{year}_eofs.nc')
-        pcs.to_netcdf(f'{outpath}/{exp_name}_{year}_pcs.nc')
+        x.to_dataset(name='x').to_netcdf(f'{outpath}/{exp_name}_{year}_x_temp.nc')
 
 
     # zonal averages and deviations
@@ -277,5 +271,24 @@ for year in years:
     postprocessing_ml(ml_files, year, ml_var_list_sel)
 
 os.chdir(outpath)
-endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp', 'eofs', 'pcs']
+
+if eof_analysis_wanted:
+
+    files = [fi for fi in os.listdir(os.getcwd()) if fi.endswith('x_temp.nc')]
+    ds = read_model_output(files)
+    from eofs.xarray import Eof
+
+    solver = Eof(ds.x)
+    eofs = solver.eofs().to_dataset(name='eofs')
+    pcs = solver.pcs(pcscaling=1)
+    var_explained = solver.varianceFraction()
+    eofs['var_exp'] = var_explained
+    eofs.to_netcdf(f'{outpath}/{exp_name}_eofs.nc')
+    pcs.to_netcdf(f'{outpath}/{exp_name}_pcs.nc')
+
+    for file in files:
+        os.remove(file)
+
+
+endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp']
 merge_pp_files(outpath, endings)
