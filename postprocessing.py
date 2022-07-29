@@ -6,12 +6,15 @@
 #SBATCH -A bd1022              # Charge resources on this project account
 #SBATCH -o EMIL_pp_%j.out      # File name for standard and error output
 
+from cmath import cos
 import os
-from re import L
+from re import U
+import aostools.climate
 import numpy as np
 import xarray as xr 
 import argparse
 from pathlib import Path
+from own_functions import calc_da_derivative, omega_earth, r_e
 
 cp = 1004
 g = 9.81
@@ -89,7 +92,8 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     md_zm = md.mean('lon')
     md_anom = md - md_zm
     print(f'{year}: zonal averages and anomalies computed')
-    cos_lat = np.cos(np.radians(md_zm.lat))
+    lat_rad = np.radians(md_zm.lat)
+    cos_lat = np.cos(lat_rad)
 
     # momentum transport
     vu_mt = md_zm.vm1 * md_zm.um1 * cos_lat
@@ -121,6 +125,7 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
         vdse_et = (md_anom.vm1 * dse_anom).mean('lon') * cos_lat
         tps['vdse_mt'] = vdse_mt
         tps['vdse_et'] = vdse_et
+        print(f'{year}: DSE transport calculated')
 
 
     # eddy kinetic energy
@@ -130,12 +135,36 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     save_complex(eke_fft.sel(k=slice(0,18), plev=slice(100,1000)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
     eke_zm = eke.mean('lon')
     md_zm['eke'] = eke_zm
+    print(f'{year}: EKE calculated')
 
+    # EP flux computation
+    md = md.reindex({'lat':np.flipud(md.lat)})
+    ep_cart1, ep_cart2, div1, div2 = aostools.climate.ComputeEPfluxDivXr(md.um1, md.vm1, md.tm1, pres='plev', w=md.vervel/100)
+    ep = ep_cart1.to_dataset(name='ep_cart1')
+    ep['ep_cart2'] = ep_cart2
+    ep['div1'] = div1
+    ep['div2'] = div2
+    md = md.reindex({'lat':np.flipud(md.lat)})
+    ep = ep.reindex({'lat':np.flipud(ep.lat)})
+    #ep = ep.resample(time='1Y').mean('time')
+    print(f'{year}: EP fluxes calculated')
+
+    # Zonal Momentum Equation
+    u_zm_eq = md.um1.differentiate('time').to_dataset(name='dudt')
+    u_zm_eq['u_adv_phi'] = md_zm.vm1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
+    u_zm_eq['u_adv_p'] = md_zm.vervel * calc_da_derivative(md_zm.um1, md_zm.plev)
+    u_zm_eq['f_v'] = 2 * omega_earth * np.sin(lat_rad) * md_zm.vm1
+    u_zm_eq['vu_et'] = 1/(r_e * cos_lat**2) * calc_da_derivative((md_anom.vm1 * md_anom.tm1).mean('lon') * cos_lat**2, lat_rad, coord_name='lat')
+    u_zm_eq['wu_et'] = calc_da_derivative((md_anom.vervel * md_anom.um1).mean('lon'), md_zm.plev)
+    u_zm_eq['residual'] = u_zm_eq.dudt + u_zm_eq.u_adv_phi + u_zm_eq.u_adv_p - u_zm_eq.f_v + u_zm_eq.vu_et + u_zm_eq.wu_et
+    print(f'{year}: zonal momentum equation calculated')
 
     md.sel(lat=slice(90,0)).sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
     tps.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
     tps_ml.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_int_pp.nc')
+    ep.to_netcdf(f'{outpath}/{exp_name}_{year}_ep_pp.nc')
+    u_zm_eq.to_netcdf(f'{outpath}/{exp_name}_{year}_zmom_eq_pp.nc')
 
     print(f'{year}: \t done')
     md.close()
@@ -213,7 +242,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('exp_name')
 parser.add_argument('--ml', action='store_true', default=False)
 parser.add_argument('--eofs', action='store_true', default=False)
-parser.add_argument('--years', nargs='*', default=['2000', '2001', '2002'])
+parser.add_argument('--years', nargs='*', default=['1998', '1999', '2000', '2001', '2002'])
 args = vars(parser.parse_args())
 
 exp_name=args['exp_name']
@@ -290,5 +319,5 @@ if eof_analysis_wanted:
         os.remove(file)
 
 
-endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp']
+endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp', 'ep_pp', 'zmom_eq_pp']
 merge_pp_files(outpath, endings)
