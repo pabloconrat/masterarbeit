@@ -26,7 +26,9 @@ def xr_spatial_fft_analysis(data):
     dim='k'
     result =  xr.apply_ufunc(
         np.fft.fft, data, input_core_dims=[['lon']], output_core_dims=[[dim]],
-        kwargs={'norm':'ortho'}
+        kwargs={'norm':'ortho'},
+        dask='parallelized',
+        dask_gufunc_kwargs={'output_sizes':{'k':data.lon.size}}
     )
     k = np.fft.fftfreq(result.k.shape[0], d=dx/(360))
     result[dim] = k
@@ -36,7 +38,7 @@ def save_complex(data_array, *args, **kwargs):
     ds = xr.Dataset({'real': data_array.real, 'imag': data_array.imag})
     return ds.to_netcdf(*args, **kwargs)
 
-def read_model_output(infiles, var_list_sel=None, fillna=False):
+def read_model_output_old(infiles, var_list_sel=None, fillna=False):
     ds_list = []
     for file in infiles:
         if var_list_sel is None:
@@ -50,6 +52,13 @@ def read_model_output(infiles, var_list_sel=None, fillna=False):
     ds = xr.combine_by_coords(ds_list, combine_attrs='drop_conflicts', data_vars='minimal')
     for ds_f in ds_list:
         ds_f.close()
+    return ds
+
+def read_model_output(infiles, var_list_sel=None, fillna=False):
+    if var_list_sel is None:
+        ds = xr.open_mfdataset(infiles, combine='by_coords')
+    else:
+        ds = xr.open_mfdataset(infiles, combine='by_coords')[var_list_sel]
     return ds
 
 def merge_pp_files(path, types):
@@ -66,9 +75,8 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     files_in_year = [mf for mf in model_files if year in mf ]
     files_in_year.sort()
     # model data
-    md = read_model_output(files_in_year, var_list_sel=pl_var_list_sel, fillna=True).sortby('time')
+    md = read_model_output(files_in_year, var_list_sel=pl_var_list_sel, fillna=True).sortby('time').load()
     print(f'{year}: model data read in')
-
     nplevs = md.plev.size
     dp_top = (md.plev.isel(plev=0) + md.plev.isel(plev=1).values)/2 - md.plev.isel(plev=0).values
     dp_mid = ((md.plev.isel(plev=slice(1,nplevs-1)) + md.plev.isel(plev=slice(2,nplevs)).values)/2 -
@@ -150,7 +158,7 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     print(f'{year}: EP fluxes calculated')
 
     # Zonal Momentum Equation
-    u_zm_eq = md.um1.differentiate('time').to_dataset(name='dudt')
+    u_zm_eq = md_zm.um1.differentiate('time').to_dataset(name='dudt')
     u_zm_eq['u_adv_phi'] = md_zm.vm1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
     u_zm_eq['u_adv_p'] = md_zm.vervel * calc_da_derivative(md_zm.um1, md_zm.plev)
     u_zm_eq['f_v'] = 2 * omega_earth * np.sin(lat_rad) * md_zm.vm1
@@ -176,7 +184,7 @@ def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g):
     files_in_year = [mf for mf in model_files if year in mf ]
     files_in_year.sort()
     # model data
-    md = read_model_output(files_in_year, var_list_sel=ml_var_list_sel, fillna=True).sortby('time')
+    md = read_model_output(files_in_year, var_list_sel=ml_var_list_sel, fillna=True).sortby('time').load()
     print(f'ml - {year}: model data read in')
 
     md['p'] = md.hyam + md.hybm * md.aps
@@ -242,18 +250,24 @@ parser = argparse.ArgumentParser()
 parser.add_argument('exp_name')
 parser.add_argument('--ml', action='store_true', default=False)
 parser.add_argument('--eofs', action='store_true', default=False)
-parser.add_argument('--years', nargs='*', default=['1998', '1999', '2000', '2001', '2002'])
+parser.add_argument('--years', nargs='*', default=None)
 args = vars(parser.parse_args())
 
 exp_name=args['exp_name']
 eof_analysis_wanted=args['eofs']
 ml=args['ml']
-years=args['years']
 output_ending = 'vaxtra.nc'
 ml_output_ending='emil.nc'
 
 inpath=f'/work/bd1022/b381739/{exp_name}'
 outpath=f'/work/bd1022/b381739/{exp_name}/postprocessed'
+
+print(inpath)
+if args['years'] is not None:
+    years=args['years']
+else:
+    years = list(set([fi[15:19] for fi in os.listdir(inpath) if fi.endswith(output_ending)])).sort()
+    print(f'years: {years}')
 
 
 #inpath=f'/mnt/c/Users/pablo/Nextcloud/3_Mastersemester/Masterarbeit/test_files'
@@ -304,7 +318,7 @@ os.chdir(outpath)
 if eof_analysis_wanted:
 
     files = [fi for fi in os.listdir(os.getcwd()) if fi.endswith('x_temp.nc')]
-    ds = read_model_output(files)
+    ds = read_model_output(files).load()
     from eofs.xarray import Eof
 
     solver = Eof(ds.x)
