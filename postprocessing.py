@@ -14,11 +14,8 @@ import numpy as np
 import xarray as xr 
 import argparse
 from pathlib import Path
-from own_functions import calc_da_derivative, omega_earth, r_e
+from own_functions import calc_da_derivative, omega_earth, r_e, cp, g0, r_air, p00
 
-cp = 1004
-g = 9.81
-r_e = 6.37e6
 
 def xr_spatial_fft_analysis(data):
     
@@ -157,13 +154,23 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     #ep = ep.resample(time='1Y').mean('time')
     print(f'{year}: EP fluxes calculated')
 
+    # calculate v_star and vervel_star for the TEM formulated equation
+    theta = md_zm.tm1 * (p00/md_zm.plev) ** (r_air/cp)
+    vtheta_et = vT_et * (p00/md_zm.plev) ** (r_air/cp)
+    dtheta_dp = theta.differentiate('plev') / 100
+    d_vtheta_et_dp = (vtheta_et/dtheta_dp).differentiate('plev') / 100 # rescale to Pa
+    d_vtheta_et_dphi = 1/(r_e * cos_lat) * ((vtheta_et * cos_lat)/dtheta_dp).differentiate('lat') * 360 / (2*np.pi) # rescale to radians
+
+    v_star = md_zm.vm1 - d_vtheta_et_dp
+    vervel_star = md_zm.vervel + d_vtheta_et_dphi
+
     # Zonal Momentum Equation
     u_zm_eq = md_zm.um1.differentiate('time').to_dataset(name='dudt')
     u_zm_eq['u_adv_phi'] = md_zm.vm1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
     u_zm_eq['u_adv_p'] = md_zm.vervel * calc_da_derivative(md_zm.um1, md_zm.plev)
-    u_zm_eq['f_v'] = 2 * omega_earth * np.sin(lat_rad) * md_zm.vm1
-    u_zm_eq['vu_et'] = 1/(r_e * cos_lat**2) * calc_da_derivative((md_anom.vm1 * md_anom.tm1).mean('lon') * cos_lat**2, lat_rad, coord_name='lat')
-    u_zm_eq['wu_et'] = calc_da_derivative((md_anom.vervel * md_anom.um1).mean('lon'), md_zm.plev)
+    u_zm_eq['f_v'] = 2 * omega_earth * np.sin(lat_rad) * md_zm.vm1 
+    u_zm_eq['vu_et'] = 1/(r_e * cos_lat**2) * calc_da_derivative((md_anom.vm1 * md_anom.um1).mean('lon') * cos_lat**2, lat_rad, coord_name='lat')
+    u_zm_eq['wu_et'] = calc_da_derivative((md_anom.vervel * md_anom.um1).mean('lon'), md_zm.plev * 100)
     u_zm_eq['residual'] = u_zm_eq.dudt + u_zm_eq.u_adv_phi + u_zm_eq.u_adv_p - u_zm_eq.f_v + u_zm_eq.vu_et + u_zm_eq.wu_et
     print(f'{year}: zonal momentum equation calculated')
 
@@ -179,7 +186,7 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     md_anom.close()
     return
 
-def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g):
+def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g0):
 
     files_in_year = [mf for mf in model_files if year in mf ]
     files_in_year.sort()
@@ -219,13 +226,11 @@ def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g):
     tps = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
 
     # dry static energy transport
-    cp = 1004
-    g = 9.81
     if 'geopot' in md:
         dse = cp * md.tm1 + md.geopot
         dse_anom = dse - dse.mean('lon')
-        vdse_mt = (md_zm.vm1 * dse * dp).sum('lev').mean('lon') * cos_lat * 2 * np.pi * r_e / g
-        vdse_et = (md_anom.vm1 * dse_anom * dp).sum('lev').mean('lon') * cos_lat * 2 * np.pi * r_e / g
+        vdse_mt = (md_zm.vm1 * dse * dp).sum('lev').mean('lon') * cos_lat * 2 * np.pi * r_e / g0
+        vdse_et = (md_anom.vm1 * dse_anom * dp).sum('lev').mean('lon') * cos_lat * 2 * np.pi * r_e / g0
         tps['vdse_mt'] = vdse_mt
         tps['vdse_et'] = vdse_et
         print(f'ml - {year}: DSE transport calculated')
