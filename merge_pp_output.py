@@ -63,6 +63,8 @@ print(spinup_files)
 print(spinon_files)
 print(exp_files)
 
+assert len(spinup_files) == len(spinon_files) == len(exp_files), 'Postprocessed output does not match'
+
 ds_list_e = []
 ds_list_s = []
 ds_list_s2 = []
@@ -92,9 +94,12 @@ print(f'start/end spinup: {ds_list_s[i].time[0].values}, {ds_list_s[i].time[-1].
 print(f'start/end spinon: {ds_list_s2[i].time[0].values}, {ds_list_s2[i].time[-1].values}')
 print(f'start/end exp: {ds_list_e[i].time[0].values}, {ds_list_e[i].time[-1].values}')
 
+if 'trans_date' in ds_list_e[0]:
+    raise RuntimeError('Output has already been merged!')
+
 print('concatenating files')
 for i in range(len(exp_files)):
-    
+
     ds_spinup_select = ds_list_s[i].sel(time=slice(start_time, init_time - np.timedelta64(1, 'D')))
     ds_spinon_select = ds_list_s2[i].sel(time=slice(init_time, trans_time - np.timedelta64(1, 'D')))
 
