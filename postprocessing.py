@@ -105,8 +105,8 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     vu_et = (md_anom.vm1 * md_anom.um1 ).mean('lon') * cos_lat
     print(f'{year}: momentum transport calculated')
 
-    wu_mt = md_zm.vervel * md_zm.um1 * cos_lat
-    wu_et = (md_anom.vervel * md_anom.um1).mean('lon') * cos_lat
+    wu_mt = md_zm.vervel * md_zm.um1 #* cos_lat
+    wu_et = (md_anom.vervel * md_anom.um1).mean('lon') #* cos_lat
     print(f'{year}: vertical transport of zonal momentum calculated')
 
     # heat transport
@@ -167,19 +167,40 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     # Zonal Momentum Equation
     u_zm_eq = md_zm.um1.differentiate('time').to_dataset(name='dudt')
     u_zm_eq['u_adv_phi'] = md_zm.vm1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
-    u_zm_eq['u_adv_p'] = md_zm.vervel * calc_da_derivative(md_zm.um1, md_zm.plev)
+    u_zm_eq['u_adv_p'] = md_zm.vervel * calc_da_derivative(md_zm.um1, md_zm.plev * 100)
     u_zm_eq['f_v'] = 2 * omega_earth * np.sin(lat_rad) * md_zm.vm1 
-    u_zm_eq['vu_et'] = 1/(r_e * cos_lat**2) * calc_da_derivative((md_anom.vm1 * md_anom.um1).mean('lon') * cos_lat**2, lat_rad, coord_name='lat')
+    u_zm_eq['vu_et'] = 1/(r_e * cos_lat**2) * calc_da_derivative(vu_et * cos_lat, lat_rad, coord_name='lat') # vu_et has one cos_lat in it
     u_zm_eq['wu_et'] = calc_da_derivative((md_anom.vervel * md_anom.um1).mean('lon'), md_zm.plev * 100)
     u_zm_eq['residual'] = u_zm_eq.dudt + u_zm_eq.u_adv_phi + u_zm_eq.u_adv_p - u_zm_eq.f_v + u_zm_eq.vu_et + u_zm_eq.wu_et
     print(f'{year}: zonal momentum equation calculated')
 
+    # TEM Zonal Momentum Equation
+    u_zm_tem = md_zm.um1.differentiate('time').to_dataset(name='dudt')
+    u_zm_tem['v_star'] = v_star
+    u_zm_tem['vervel_star'] = vervel_star
+    u_zm_tem['u_adv_phi'] = v_star/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
+    u_zm_tem['u_adv_p'] = vervel_star * calc_da_derivative(md_zm.um1, md_zm.plev)
+    u_zm_tem['f_v'] = 2 * omega_earth * np.sin(lat_rad) * v_star 
+    u_zm_tem['dphi_vu_et'] = - 1/(r_e * cos_lat) * calc_da_derivative(vu_et, lat_rad, coord_name='lat')
+    u_zm_tem['u_adv_p_rev'] = calc_da_derivative(md_zm.um1, md_zm.plev*100) * d_vtheta_et_dphi # 1/cos_lat in d_vtheta...
+    #         ^ alternative: dphi_vpthp-dp_u
+    u_zm_tem['tan_phi_vu_et'] = np.tan(np.radians(md_zm.lat)) * vu_et/cos_lat / r_e
+    u_zm_tem['dp_vpthp_f'] = d_vtheta_et_dp * 2 * omega_earth * np.sin(lat_rad)
+    u_zm_tem['u_adv_phi_rev'] = - d_vtheta_et_dp * 1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat')
+    u_zm_tem['dp_wu_et'] = - calc_da_derivative(wu_et, md_zm.plev*100)
+    u_zm_tem['residual'] = (
+        u_zm_tem.dudt + u_zm_tem.u_adv_phi + u_zm_tem.u_adv_p - u_zm_tem.f_v 
+        - u_zm_tem.dphi_vu_et - u_zm_tem.u_adv_p_rev - u_zm_tem.tan_phi_vu_et 
+        - u_zm_tem.dp_vpthp_f - u_zm_tem.u_adv_phi_rev - u_zm_tem.dp_wu_et
+    )
+    
     md.sel(lat=slice(90,0)).sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
     tps.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
     tps_ml.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_int_pp.nc')
     ep.to_netcdf(f'{outpath}/{exp_name}_{year}_ep_pp.nc')
     u_zm_eq.to_netcdf(f'{outpath}/{exp_name}_{year}_zmom_eq_pp.nc')
+    u_zm_tem.to_netcdf(f'{outpath}/{exp_name}_{year}_zmom_tem_eq_pp.nc')
 
     print(f'{year}: \t done')
     md.close()
@@ -191,7 +212,7 @@ def postprocessing_ml(model_files, year, ml_var_list_sel, r_e=r_e, g=g0):
     files_in_year = [mf for mf in model_files if year in mf ]
     files_in_year.sort()
     # model data
-    md = read_model_output(files_in_year, var_list_sel=ml_var_list_sel, fillna=True).sortby('time').load()
+    md = read_model_output(files_in_year, var_list_sel=ml_var_list_sel, fillna=True).sortby('time')
     print(f'ml - {year}: model data read in')
 
     md['p'] = md.hyam + md.hybm * md.aps
@@ -268,6 +289,7 @@ inpath=f'/work/bd1022/b381739/{exp_name}'
 outpath=f'/work/bd1022/b381739/{exp_name}/postprocessed'
 
 print(inpath)
+print(f'Model level analysis wanted? {ml}')
 if args['years'] is not None:
     years=args['years']
 else:
@@ -316,7 +338,8 @@ fillna_values = {"um1": 0, "vm1": 0, 'vervel': 0}
 
 for year in years:
     postprocessing_pl(pl_files, year, pl_var_list_sel)
-    postprocessing_ml(ml_files, year, ml_var_list_sel)
+    if ml:
+        postprocessing_ml(ml_files, year, ml_var_list_sel)
 
 os.chdir(outpath)
 
@@ -338,5 +361,5 @@ if eof_analysis_wanted:
         os.remove(file)
 
 
-endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp', 'ep_pp', 'zmom_eq_pp']
+endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp', 'ep_pp', 'zmom_eq_pp', 'zmom_tem_eq_pp']
 merge_pp_files(outpath, endings)
