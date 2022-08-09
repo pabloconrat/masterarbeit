@@ -194,7 +194,7 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
         - u_zm_tem.dp_vpthp_f - u_zm_tem.u_adv_phi_rev - u_zm_tem.dp_wu_et
     )
     
-    md.sel(lat=slice(90,0)).sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
+    md.sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
     tps.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
     tps_ml.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_int_pp.nc')
