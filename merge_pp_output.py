@@ -40,7 +40,7 @@ args = vars(parser.parse_args())
 exp_name=args['exp_name']
 spinup_name=args['spinup_name']
 spinon_name=args['spinon_name']
-output_endings=('eke_fft.nc','pl_sel.nc','transports_int_pp.nc','transports_pp.nc', 'zm_pp.nc', 'ep_pp.nc')
+output_endings=('eke_fft.nc','pl_sel.nc','transports_int_pp.nc','transports_pp.nc', 'zm_pp.nc', 'ep_pp.nc', 'zmom_eq_pp.nc', 'zmom_tem_eq_pp.nc')
 
 
 inpath=f'/work/bd1022/b381739/{exp_name}/postprocessed'
