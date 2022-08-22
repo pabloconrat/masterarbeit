@@ -1,14 +1,10 @@
 {
-    "granitgrau": "#413937",
-    "lila": "#A44FA2",
-    "gruen": "#96A129",
-    "himmelblau": "#7EBBFC",
-    "gold": "#F8C508",
-    "granitbraun": "#6D6260",
-    "sandstein": "#AB8F81",
-    "flieder": "#B18CB5",
-    "dunkelgruen": "#2D3609",
-    "meerblau": "#799CC2",
-    "dunkelgelb": "#987823",
-    "braun": "#4E321C"
+    "orange": "#EE7733",
+    "blue": "#0077BB",
+    "cyan": "#33BBEE",
+    "magenta": "#EE3377",
+    "purple": "#AA3377",
+    "teal": "#009988",
+    "grey": "#BBBBBB",
+    "black": "#000000"
 }
