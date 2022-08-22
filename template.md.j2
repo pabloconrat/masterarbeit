@@ -1,0 +1,21 @@
+---
+title: "EMIL postprocessing"
+author: Pablo Conrat
+geometry: "left=5cm,right=5cm,top=2cm,bottom=2cm"
+output: pdf_document
+---
+
+
+{% for item in presentation_list %}
+
+## {{item.title.title()}}
+
+{{item.comment}}
+
+{% for path in item.plots %}
+
+![]({{path}} "{{path}}")
+
+{% endfor %}
+
+{% endfor %}

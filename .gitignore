@@ -1,3 +1,11 @@
 *.out
 *.err
 *.log
+*.csv
+*-checkpoint.ipynb
+*checkpoint.py
+*.nc
+
+#specifics
+ml_visualizations.ipynb
+Untitled.ipynb
