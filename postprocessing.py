@@ -14,7 +14,7 @@ import numpy as np
 import xarray as xr 
 import argparse
 from pathlib import Path
-from own_functions import calc_da_derivative, omega_earth, r_e, cp, g0, r_air, p00
+from own_functions import calc_da_derivative, interp_p_to_theta, omega_earth, r_e, cp, g0, r_air, p00
 
 
 def xr_spatial_fft_analysis(data):
@@ -92,13 +92,30 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
         x = x * np.sqrt(np.cos(np.deg2rad(x.lat)))
         x.to_dataset(name='x').to_netcdf(f'{outpath}/{exp_name}_{year}_x_temp.nc')
 
+    print(f'{year}: zonal averages and anomalies computed')
+    lat_rad = np.radians(md.lat)
+    lon_rad = np.radians(md.lon)
+    cos_lat = np.cos(lat_rad)
+    f = 2*omega_earth*np.sin(lat_rad)
+
+    # PV
+    md['theta'] = md.tm1 * (p00/md.plev) ** (r_air/cp)
+    cos_lat = np.cos(np.radians(md.lat))
+    # calculate gradient of pot. temperature w.r.t. pressure
+    dtheta_dp = md.theta.differentiate('plev')/100
+    # calculate the absolute vorticity in vertical (pressure) direction
+    zeta_a = ((calc_da_derivative(md.vm1, lon_rad, coord_name='lon') - calc_da_derivative(md.um1 * cos_lat, lat_rad, coord_name='lat'))
+              /(r_e * cos_lat) + f)
+    # calculate PV twisting term
+    pv_twist = (md.um1.differentiate('plev')/100 * calc_da_derivative(md.theta, lat_rad, coord_name='lat')
+                - md.vm1.differentiate('plev')/100 * calc_da_derivative(md.theta, lon_rad, coord_name='lon')/cos_lat)
+    # rescale to PVU
+    md['pv'] = -1e6 * g0 * (zeta_a * dtheta_dp + pv_twist/r_e)
+    print(f'{year}: PV calculated')
 
     # zonal averages and deviations
     md_zm = md.mean('lon')
     md_anom = md - md_zm
-    print(f'{year}: zonal averages and anomalies computed')
-    lat_rad = np.radians(md_zm.lat)
-    cos_lat = np.cos(lat_rad)
 
     # momentum transport
     vu_mt = md_zm.vm1 * md_zm.um1 * cos_lat
@@ -114,11 +131,15 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     vT_et = (md_anom.vm1 * md_anom.tm1).mean('lon') * cos_lat
     print(f'{year}: heat transport calculated')
 
+    # PV transport
+    vq_mt = md_zm.vm1 * md_zm.pv * cos_lat
+    vq_et = (md_anom.vm1 * md_anom.pv).mean('lon') * cos_lat
+
     # Interpolate heat transport to 700 hPa 
     vT_mt_700 = vT_mt.interp(plev=700)
     vT_et_700 = vT_et.interp(plev=700)
  
-    tps = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'vT_mt': vT_mt, 'vT_et': vT_et, 'wu_mt': wu_mt, 'wu_et': wu_et})
+    tps = xr.Dataset({'vu_mt': vu_mt, 'vu_et': vu_et, 'vT_mt': vT_mt, 'vT_et': vT_et, 'wu_mt': wu_mt, 'wu_et': wu_et, 'vq_mt': vq_mt, 'vq_et': vq_et})
     tps_ml = xr.Dataset({'vT_mt': vT_mt_700, 'vT_et': vT_et_700})
 
     # dry static energy transport
@@ -134,7 +155,6 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
 
 
     # eddy kinetic energy
-
     eke = ((md.vm1**2) + (md.um1**2)) * 0.5
     eke_fft = xr_spatial_fft_analysis(eke)
     save_complex(eke_fft.sel(k=slice(0,18), plev=slice(100,1000)), f'{outpath}/{exp_name}_{year}_eke_fft.nc')
@@ -155,9 +175,8 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     print(f'{year}: EP fluxes calculated')
 
     # calculate v_star and vervel_star for the TEM formulated equation
-    theta = md_zm.tm1 * (p00/md_zm.plev) ** (r_air/cp)
     vtheta_et = vT_et * (p00/md_zm.plev) ** (r_air/cp)
-    dtheta_dp = theta.differentiate('plev') / 100
+    dtheta_dp = md_zm.theta.differentiate('plev') / 100
     d_vtheta_et_dp = (vtheta_et/dtheta_dp).differentiate('plev') / 100 # rescale to Pa
     d_vtheta_et_dphi = 1/(r_e * cos_lat) * ((vtheta_et * cos_lat)/dtheta_dp).differentiate('lat') * 360 / (2*np.pi) # rescale to radians
 
@@ -179,8 +198,8 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     u_zm_tem['v_star'] = v_star
     u_zm_tem['vervel_star'] = vervel_star
     u_zm_tem['u_adv_phi'] = v_star/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
-    u_zm_tem['u_adv_p'] = vervel_star * calc_da_derivative(md_zm.um1, md_zm.plev)
-    u_zm_tem['f_v'] = 2 * omega_earth * np.sin(lat_rad) * v_star 
+    u_zm_tem['u_adv_p'] = vervel_star * calc_da_derivative(md_zm.um1, md_zm.plev * 100)
+    u_zm_tem['v_star'] = 2 * omega_earth * np.sin(lat_rad) * v_star 
     u_zm_tem['dphi_vu_et'] = - 1/(r_e * cos_lat) * calc_da_derivative(vu_et, lat_rad, coord_name='lat')
     u_zm_tem['u_adv_p_rev'] = calc_da_derivative(md_zm.um1, md_zm.plev*100) * d_vtheta_et_dphi # 1/cos_lat in d_vtheta...
     #         ^ alternative: dphi_vpthp-dp_u
@@ -194,8 +213,16 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
         - u_zm_tem.dp_vpthp_f - u_zm_tem.u_adv_phi_rev - u_zm_tem.dp_wu_et
     )
     
+    # interpolate to isentropes
+    md_isent_zm = interp_p_to_theta(md_zm[['um1', 'vm1', 'tm1', 'pv', 'theta']])
+    md_isent_zm['aps'] = md_zm.aps
+    md_isent_sel = interp_p_to_theta(md[['um1', 'vm1', 'tm1', 'pv', 'theta']], theta_levels=theta_levels_pl_sel)
+    md_isent_sel['aps'] = md.aps
+
     md.sel(plev=[200,300,500,700,850], method='nearest').to_netcdf(f'{outpath}/{exp_name}_{year}_pl_sel.nc')    
     md_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_pp.nc')
+    md_isent_zm.to_netcdf(f'{outpath}/{exp_name}_{year}_zm_isent_pp.nc')
+    md_isent_sel.to_netcdf(f'{outpath}/{exp_name}_{year}_il_sel_pp.nc')
     tps.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_pp.nc')
     tps_ml.to_netcdf(f'{outpath}/{exp_name}_{year}_transports_int_pp.nc')
     ep.to_netcdf(f'{outpath}/{exp_name}_{year}_ep_pp.nc')
@@ -289,12 +316,12 @@ inpath=f'/work/bd1022/b381739/{exp_name}'
 outpath=f'/work/bd1022/b381739/{exp_name}/postprocessed'
 
 print(inpath)
-print(f'Model level analysis wanted? {ml}')
+print(f'... Model level analysis wanted? {ml}')
 if args['years'] is not None:
     years=args['years']
 else:
     years = list(set([fi[15:19] for fi in os.listdir(inpath) if fi.endswith(output_ending)])).sort()
-    print(f'years: {years}')
+    print(f'...years: {years}')
 
 
 #inpath=f'/mnt/c/Users/pablo/Nextcloud/3_Mastersemester/Masterarbeit/test_files'
@@ -313,10 +340,11 @@ os.chdir(inpath)
 pl_files = [fi for fi in os.listdir(inpath) if fi.endswith(output_ending) and fi.startswith(filecheck_tuple)]
 ml_files = [fi for fi in os.listdir(inpath) if fi.endswith(ml_output_ending) and fi.startswith(filecheck_tuple)]
 
-print(exp_name)
-print(years)
+print(f'... experiment name: {exp_name}')
+print(f'... years to analyze: {years}')
 
 var_list = ['um1', 'vm1', 'vervel', 'tm1', 'aps', 'geopot_p', 'geopot', 'hyam', 'hybm']
+theta_levels_pl_sel = np.array([275.0, 285.0, 300.0, 315.0, 330.0, 350.0])
 
 pl_var_list_sel = []
 ml_var_list_sel = []
@@ -330,8 +358,8 @@ for var in var_list:
 
 pl_file.close()
 ml_file.close()
-print(f'pressure level variables: {pl_var_list_sel}')
-print(f'model level variables: {ml_var_list_sel}')
+print(f'... pressure level variables: {pl_var_list_sel}')
+print(f'... model level variables: {ml_var_list_sel}')
 
 # set NaN in the wind fields to zero to reduce spurius averages of only a few points
 fillna_values = {"um1": 0, "vm1": 0, 'vervel': 0}
@@ -360,6 +388,7 @@ if eof_analysis_wanted:
     for file in files:
         os.remove(file)
 
-
-endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp', 'ep_pp', 'zmom_eq_pp', 'zmom_tem_eq_pp']
+print('...Merging output')
+endings = ['transports_pp', 'pl_sel', 'zm_pp', 'eke_fft', 'transports_int_pp', 'ep_pp', 'zmom_eq_pp', 'zmom_tem_eq_pp', 'zm_isent_pp', 'il_sel_pp']
 merge_pp_files(outpath, endings)
+print('===|Done|===')
