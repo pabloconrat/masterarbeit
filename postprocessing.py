@@ -164,7 +164,9 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
 
     # EP flux computation
     md = md.reindex({'lat':np.flipud(md.lat)})
-    ep_cart1, ep_cart2, div1, div2 = aostools.climate.ComputeEPfluxDivXr(md.um1, md.vm1, md.tm1, pres='plev', w=md.vervel/100)
+    ep_cart1, ep_cart2, div1, div2 = aostools.climate.ComputeEPfluxDivXr(
+        md.um1, md.vm1, md.tm1, pres='plev', w=md.vervel/100, do_ubar=True
+    )
     ep = ep_cart1.to_dataset(name='ep_cart1')
     ep['ep_cart2'] = ep_cart2
     ep['div1'] = div1
@@ -184,7 +186,7 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     vervel_star = md_zm.vervel + d_vtheta_et_dphi
 
     # Zonal Momentum Equation
-    u_zm_eq = md_zm.um1.differentiate('time').to_dataset(name='dudt')
+    u_zm_eq = md_zm.um1.differentiate('time', datetime_unit="s").to_dataset(name='dudt')
     u_zm_eq['u_adv_phi'] = md_zm.vm1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
     u_zm_eq['u_adv_p'] = md_zm.vervel * calc_da_derivative(md_zm.um1, md_zm.plev * 100)
     u_zm_eq['f_v'] = 2 * omega_earth * np.sin(lat_rad) * md_zm.vm1 
@@ -194,23 +196,21 @@ def postprocessing_pl(model_files, year, pl_var_list_sel):
     print(f'{year}: zonal momentum equation calculated')
 
     # TEM Zonal Momentum Equation
-    u_zm_tem = md_zm.um1.differentiate('time').to_dataset(name='dudt')
+    u_zm_tem = md_zm.um1.differentiate('time', datetime_unit="s").to_dataset(name='dudt')
     u_zm_tem['v_star'] = v_star
     u_zm_tem['vervel_star'] = vervel_star
-    u_zm_tem['u_adv_phi'] = v_star/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') 
-    u_zm_tem['u_adv_p'] = vervel_star * calc_da_derivative(md_zm.um1, md_zm.plev * 100)
-    u_zm_tem['v_star'] = 2 * omega_earth * np.sin(lat_rad) * v_star 
-    u_zm_tem['dphi_vu_et'] = - 1/(r_e * cos_lat) * calc_da_derivative(vu_et, lat_rad, coord_name='lat')
+    u_zm_tem['wu_mt'] = vervel_star * calc_da_derivative(md_zm.um1, md_zm.plev * 100)
+    u_zm_tem['vo_mt'] = v_star  * (1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat') - f)
+    u_zm_tem['dphi_vu_et'] = - 1/(r_e * cos_lat**2) * calc_da_derivative(vu_et * cos_lat**2, lat_rad, coord_name='lat')
     u_zm_tem['u_adv_p_rev'] = calc_da_derivative(md_zm.um1, md_zm.plev*100) * d_vtheta_et_dphi # 1/cos_lat in d_vtheta...
     #         ^ alternative: dphi_vpthp-dp_u
-    u_zm_tem['tan_phi_vu_et'] = np.tan(np.radians(md_zm.lat)) * vu_et/cos_lat / r_e
-    u_zm_tem['dp_vpthp_f'] = d_vtheta_et_dp * 2 * omega_earth * np.sin(lat_rad)
-    u_zm_tem['u_adv_phi_rev'] = - d_vtheta_et_dp * 1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat')
+    #u_zm_tem['tan_phi_vu_et'] = np.tan(np.radians(md_zm.lat)) * vu_et/cos_lat / r_e
+    u_zm_tem['vo_et'] = d_vtheta_et_dp * (f - 1/(r_e * cos_lat) * calc_da_derivative(md_zm.um1 * cos_lat, lat_rad, coord_name='lat'))
     u_zm_tem['dp_wu_et'] = - calc_da_derivative(wu_et, md_zm.plev*100)
     u_zm_tem['residual'] = (
-        u_zm_tem.dudt + u_zm_tem.u_adv_phi + u_zm_tem.u_adv_p - u_zm_tem.f_v 
-        - u_zm_tem.dphi_vu_et - u_zm_tem.u_adv_p_rev - u_zm_tem.tan_phi_vu_et 
-        - u_zm_tem.dp_vpthp_f - u_zm_tem.u_adv_phi_rev - u_zm_tem.dp_wu_et
+        u_zm_tem.dudt + u_zm_tem.wu_mt + u_zm_tem.vo_mt 
+        - u_zm_tem.dphi_vu_et - u_zm_tem.u_adv_p_rev
+        - u_zm_tem.vo_et - u_zm_tem.dp_wu_et
     )
     
     # interpolate to isentropes
